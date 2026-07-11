@@ -1,11 +1,57 @@
-# 默认忽略的文件
-/shelf/
-/workspace.xml
-# 基于编辑器的 HTTP 客户端请求
-/httpRequests/
-# Datasource local storage ignored files
-/dataSources/
-/dataSources.local.xml
+# --- Python 构建产物 ---
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+*.tar.gz
 
+# --- uv 缓存（可选，通常不提交）---
+# 如果为了 CI 加速而保留 uv.lock，则不要忽略 uv.lock
+# uv.lock 应提交（见上文讨论）
+# .uv/ 是 uv 的内部缓存目录，一般不生成，如果出现可忽略
+.uv/
+
+# --- Python 编译缓存 ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# --- 测试与覆盖率 ---
+.coverage
+coverage/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+
+# --- IDE 配置文件 ---
+.vscode/
 .idea/
-.venv
+*.swp
+*.swo
+*~
+.DS_Store
+
+# --- 日志与临时文件 ---
+*.log
+*.tmp
+*.bak
+*.orig
+
+# --- 虚拟环境（如果用 venv 或 conda）---
+.venv/
+env/
+venv/
+conda-env/
+
+# --- 操作系统文件 ---
+Thumbs.db
+Desktop.ini
+
+# --- 项目特定（可选）---
+# 如果你后续添加了 secrets 或配置文件
+.env
+*.secret
