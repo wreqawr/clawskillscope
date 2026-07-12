@@ -56,3 +56,5 @@ Desktop.ini
 .env
 *.secret
 report.html
+report.md
+test_*.*

@@ -1,8 +1,17 @@
 """对照实验模块"""
 import tempfile
 
-from .models import SkillModel, ComparisonReport
-from .runner import OpenClawRunner
+from src.clawskillscope.evaluator import evaluate_skill_quality
+from src.clawskillscope.models import SkillModel, ComparisonReport, TaskTrace
+from src.clawskillscope.runner import OpenClawRunner
+
+
+def _extract_answer(trace: TaskTrace) -> str:
+    """从 trace 中提取最终回答"""
+    for step in reversed(trace.steps):
+        if step.step_type == "assistant" and step.content:
+            return step.content
+    return ""
 
 
 async def compare(skill: SkillModel, prompt: str) -> ComparisonReport:
@@ -24,13 +33,29 @@ async def compare(skill: SkillModel, prompt: str) -> ComparisonReport:
     token_diff = trace_with.total_tokens - trace_without.total_tokens
     duration_diff = trace_with.total_duration_ms - trace_without.total_duration_ms
 
-    # LLM 质量评分（TODO：调用 LLM 对两个回答打分）
-    quality_with = 0.0
-    quality_without = 0.0
-    summary = (
-        f"带 skill 时 token 消耗 {'增加' if token_diff > 0 else '减少'} {abs(token_diff)} tokens，"
-        f"耗时 {'增加' if duration_diff > 0 else '减少'} {abs(duration_diff):.0f}ms"
-    )
+    # LLM 质量评分
+    answer_with = _extract_answer(trace_with)
+    answer_without = _extract_answer(trace_without)
+
+    quality_with = evaluate_skill_quality(answer_with, answer_without, prompt)
+    quality_without = 5.0  # 基准分数
+
+    # 生成摘要
+    token_change = "增加" if token_diff > 0 else "减少"
+    duration_change = "增加" if duration_diff > 0 else "减少"
+
+    summary_parts = [
+        f"带 skill 时 token 消耗 {token_change} {abs(token_diff)} tokens",
+        f"耗时 {duration_change} {abs(duration_diff):.0f}ms",
+        f"回答质量评分: {quality_with:.1f}/10",
+    ]
+
+    if trace_with.tool_call_count != trace_without.tool_call_count:
+        tool_diff = trace_with.tool_call_count - trace_without.tool_call_count
+        tool_change = "增加" if tool_diff > 0 else "减少"
+        summary_parts.append(f"工具调用 {tool_change} {abs(tool_diff)} 次")
+
+    summary = "，".join(summary_parts)
 
     return ComparisonReport(
         with_skill=trace_with,

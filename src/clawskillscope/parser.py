@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from .models import SkillModel
+from src.clawskillscope.models import SkillModel
 
 
 def parse_skill(file_path: str | Path) -> SkillModel:

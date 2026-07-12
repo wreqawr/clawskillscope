@@ -1,7 +1,8 @@
 """静态评测引擎：5 维评分 + LLM Judge"""
+import json
 import re
 
-from .models import SkillModel, ScoreDimension, ScoreReport
+from src.clawskillscope.models import SkillModel, ScoreDimension, ScoreReport
 
 
 # ---------- 规则评分函数 ----------
@@ -121,7 +122,6 @@ def _check_safety(skill: SkillModel) -> ScoreDimension:
 
 def _check_norm(skill: SkillModel) -> ScoreDimension:
     """规范性评分（20%）"""
-    global unique_indents
     score = 80.0
     suggestions = []
 
@@ -138,8 +138,11 @@ def _check_norm(skill: SkillModel) -> ScoreDimension:
         if stripped and not line.startswith("```"):
             indent = len(line) - len(stripped)
             indent_counts.append(indent)
+
+    unique_indents_count = 0
     if indent_counts:
         unique_indents = set(indent_counts)
+        unique_indents_count = len(unique_indents)
         if len(unique_indents) > 3:
             score -= 10
             suggestions.append("缩进风格不一致，建议统一缩进")
@@ -154,7 +157,7 @@ def _check_norm(skill: SkillModel) -> ScoreDimension:
         name="规范性",
         score=score,
         weight=0.2,
-        details=f"缩进种类数={len(unique_indents) if indent_counts else 0}",
+        details=f"缩进种类数={unique_indents_count}",
         suggestions=suggestions,
     )
 
@@ -197,6 +200,161 @@ def _check_reusability(skill: SkillModel) -> ScoreDimension:
     )
 
 
+# ---------- LLM Judge 功能 ----------
+
+def _llm_evaluate_description(skill: SkillModel) -> ScoreDimension:
+    """使用 LLM 评估描述清晰度"""
+    from src.clawskillscope.llm import Agent
+
+    prompt = f"""请作为 Skill 质量评估专家，对以下 Skill 的描述清晰度进行评分（0-100分）。
+
+评分标准：
+- 90-100: 描述非常清晰完整，包含触发条件、功能说明、输出格式、使用边界
+- 70-89: 描述较清晰，包含大部分必要信息，但缺少少量细节
+- 50-69: 描述基本可理解，但缺少关键信息（如触发条件或使用边界）
+- 0-49: 描述模糊或不完整，难以理解 Skill 的用途和使用方式
+
+Skill 信息：
+- 名称: {skill.name}
+- 描述: {skill.description}
+- 触发条件: {skill.trigger or '未指定'}
+- 正文前200字: {skill.body[:200]}
+
+请严格按照以下 JSON 格式返回评分结果（不要添加其他内容）：
+{{
+  "score": 85,
+  "reason": "评分理由",
+  "suggestions": ["建议1", "建议2"]
+}}
+"""
+
+    try:
+        agent = Agent("qwen3.5-plus",
+                      system_prompt="你是一个专业的 Skill 质量评估专家，擅长评估 Skill 描述的清晰度和完整性。")
+        response = agent.invoke(prompt)
+
+        # 尝试解析 JSON 响应
+        import re
+        if response and isinstance(response, str):
+            json_match = re.search(r'\{[^}]+}', response, re.DOTALL)
+        else:
+            json_match = None
+        if json_match:
+            result = json.loads(json_match.group())
+            return ScoreDimension(
+                name="描述清晰度(LLM)",
+                score=float(result.get("score", 70)),
+                weight=0.25,
+                details=result.get("reason", "LLM 评估"),
+                suggestions=result.get("suggestions", []),
+            )
+    except Exception as e:
+        print(f"LLM 评估描述清晰度失败: {e}，使用规则评分")
+
+    # 失败时回退到规则评分
+    return _check_description(skill)
+
+
+def _llm_evaluate_reusability(skill: SkillModel) -> ScoreDimension:
+    """使用 LLM 评估可复用性"""
+    from src.clawskillscope.llm import Agent
+
+    prompt = f"""请作为 Skill 架构师，对以下 Skill 的可复用性进行评分（0-100分）。
+
+评分标准：
+- 90-100: 高度参数化，无硬编码，支持环境变量，可轻松适配不同场景
+- 70-89: 较好复用性，少量硬编码但不影响主要功能
+- 50-69: 有一定复用性，但存在较多硬编码或特定依赖
+- 0-49: 高度耦合，难以在其他场景复用
+
+Skill 信息：
+- 名称: {skill.name}
+- 依赖工具: {', '.join(skill.tools) if skill.tools else '无'}
+- 正文内容: {skill.body[:500]}
+
+请严格按照以下 JSON 格式返回评分结果（不要添加其他内容）：
+{{
+  "score": 75,
+  "reason": "评分理由",
+  "suggestions": ["建议1", "建议2"]
+}}
+"""
+
+    try:
+        agent = Agent("qwen3.5-plus",
+                      system_prompt="你是一个专业的 Skill 架构师，擅长评估 Skill 的可复用性和模块化设计。")
+        response = agent.invoke(prompt)
+
+        # 尝试解析 JSON 响应
+        import re
+        if response and isinstance(response, str):
+            json_match = re.search(r'\{[^}]+}', response, re.DOTALL)
+        else:
+            json_match = None
+        if json_match:
+            result = json.loads(json_match.group())
+            return ScoreDimension(
+                name="可复用性(LLM)",
+                score=float(result.get("score", 70)),
+                weight=0.2,
+                details=result.get("reason", "LLM 评估"),
+                suggestions=result.get("suggestions", []),
+            )
+    except Exception as e:
+        print(f"LLM 评估可复用性失败: {e}，使用规则评分")
+
+    # 失败时回退到规则评分
+    return _check_reusability(skill)
+
+
+def evaluate_skill_quality(answer_with: str, answer_without: str, prompt: str) -> float:
+    """使用 LLM 评估有/无 Skill 时的回答质量（0-10分）"""
+    from src.clawskillscope.llm import Agent
+
+    eval_prompt = f"""请作为 AI 回答质量评估专家，对比以下两个回答的质量。
+
+用户问题: {prompt}
+
+【带 Skill 的回答】:
+{answer_with[:1000]}
+
+【不带 Skill 的回答】:
+{answer_without[:1000]}
+
+评估标准：
+- 准确性：回答是否正确、无误导信息
+- 完整性：是否全面回答了用户问题
+- 实用性：回答是否有实际帮助
+- 清晰度：表达是否清晰易懂
+
+请只返回一个数字（0-10），表示带 Skill 的回答相比不带 Skill 的回答的质量提升程度：
+- 10: 显著提升，回答质量完全不同
+- 7-9: 明显提升，回答更好
+- 4-6: 略有提升，回答稍好
+- 1-3: 微小提升，回答几乎相同
+- 0: 无提升或更差
+
+只返回数字，不要其他内容。
+"""
+
+    try:
+        agent = Agent("qwen3.5-plus", system_prompt="你是一个专业的 AI 回答质量评估专家。")
+        response = agent.invoke(eval_prompt)
+
+        # 提取数字
+        import re
+        if response and isinstance(response, str):
+            number_match = re.search(r'(\d+(?:\.\d+)?)', response)
+        else:
+            number_match = None
+        if number_match:
+            return min(10.0, max(0.0, float(number_match.group(1))))
+    except Exception as e:
+        print(f"LLM 质量评估失败: {e}")
+
+    return 5.0  # 默认中等评分
+
+
 # ---------- 主评测函数 ----------
 
 def evaluate(skill: SkillModel, use_llm: bool = False) -> ScoreReport:
@@ -204,17 +362,22 @@ def evaluate(skill: SkillModel, use_llm: bool = False) -> ScoreReport:
     对 Skill 进行静态评测。
     若 use_llm=True，则调用 LLM 对描述清晰度和可复用性进行补充评分（需配置 API）。
     """
-    dimensions = [
-        _check_structure(skill),
-        _check_description(skill),
-        _check_safety(skill),
-        _check_norm(skill),
-        _check_reusability(skill),
-    ]
-
-    # 可选：LLM Judge 补充评分（此处留接口，后续实现）
     if use_llm:
-        pass  # TODO: 调用 LLM API 修正评分
+        dimensions = [
+            _check_structure(skill),
+            _llm_evaluate_description(skill),
+            _check_safety(skill),
+            _check_norm(skill),
+            _llm_evaluate_reusability(skill),
+        ]
+    else:
+        dimensions = [
+            _check_structure(skill),
+            _check_description(skill),
+            _check_safety(skill),
+            _check_norm(skill),
+            _check_reusability(skill),
+        ]
 
     report = ScoreReport(
         skill_name=skill.name,

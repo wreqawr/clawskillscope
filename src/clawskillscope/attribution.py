@@ -1,5 +1,5 @@
 """Skill 命中归因模块"""
-from .models import SkillModel, TaskTrace
+from src.clawskillscope.models import SkillModel, TaskTrace
 
 
 def attribute(trace: TaskTrace, skill: SkillModel) -> TaskTrace:
