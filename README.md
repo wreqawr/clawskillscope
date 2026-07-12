@@ -23,47 +23,7 @@
 
 ## 二、整体架构
 
-```mermaid
-flowchart TD
-    subgraph CLI["CLI 入口 (Typer)"]
-        A[clawscope analyze]
-    end
-
-    subgraph Core["核心模块"]
-        B[Skill 解析器<br/>parser.py]
-        C[静态评测引擎<br/>evaluator.py]
-        D[动态 Trace 收集器<br/>runner.py]
-    end
-
-    subgraph Models["统一数据模型 (Pydantic)"]
-        E[SkillModel]
-        F[ScoreReport]
-        G[TaskTrace]
-        H[ComparisonReport]
-    end
-
-    subgraph Output["输出层"]
-        I[报告生成器<br/>reporter.py]
-        J[可视化前端<br/>visualizer.py]
-        K[导出模块]
-    end
-
-    A --> B
-    A --> C
-    A --> D
-    B --> E
-    C --> F
-    D --> G
-    E --> C
-    E --> D
-    F --> I
-    G --> I
-    G --> J
-    H --> I
-    H --> J
-    I --> K
-    J --> K
-```
+![](./assets/架构图.png)
 
 ## 三、模块职责与实现要点
 
@@ -103,13 +63,13 @@ class SkillModel(BaseModel):
 
 **评分维度与权重**（参考微软 SkillLens 论文 + 实际经验）：
 
-| 维度       | 权重 | 核心检查项                                                   |
-| ---------- | ---- | ------------------------------------------------------------ |
-| 结构完整性 | 20%  | frontmatter 是否存在、字段是否齐全、body 是否有章节划分      |
-| 描述清晰度 | 25%  | description 是否包含触发条件、目标、限制；是否避免歧义       |
-| 安全性     | 15%  | 是否包含危险命令（rm -rf、curl 管道 shell 等）；是否限制工具权限 |
-| 规范性     | 20%  | 命名是否一致、缩进格式、是否遵循 OpenClaw 最佳实践           |
-| 可复用性   | 20%  | 是否依赖特定路径/环境变量；是否提供参数化配置                |
+| 维度    | 权重  | 核心检查项                                     |
+|-------|-----|-------------------------------------------|
+| 结构完整性 | 20% | frontmatter 是否存在、字段是否齐全、body 是否有章节划分      |
+| 描述清晰度 | 25% | description 是否包含触发条件、目标、限制；是否避免歧义         |
+| 安全性   | 15% | 是否包含危险命令（rm -rf、curl 管道 shell 等）；是否限制工具权限 |
+| 规范性   | 20% | 命名是否一致、缩进格式、是否遵循 OpenClaw 最佳实践            |
+| 可复用性  | 20% | 是否依赖特定路径/环境变量；是否提供参数化配置                   |
 
 **评分方法**：
 
@@ -255,20 +215,7 @@ class SkillModel(BaseModel):
 ## 推理链
 ```
 
-```mermaid
-sequenceDiagram
-
-User->>System: 请审查这段代码
-
-System->>Assistant: 注入 skill(code-review)
-
-Assistant->>Tool: call_code_review(...)
-
-Tool->>Assistant: 审查结果
-
-Assistant->>User: 最终回答
-
-```
+![](./assets/推理链.png)
 
 ```
 ## 对照实验（带 skill vs 不带）
@@ -300,47 +247,18 @@ SkillParser.parse("./my-skill.md") → SkillModel
          Reporter.generate_markdown(...) → report.md
 ```
 
-```mermaid
-flowchart LR
-    Start(["用户输入: clawscope analyze ./skill.md --prompt '...'"]) --> Parse[SkillParser.parse]
-    Parse --> SkillModel[SkillModel]
-    
-    SkillModel --> StaticEval[Evaluator.evaluate]
-    StaticEval --> ScoreReport[ScoreReport]
-    
-    SkillModel --> Run[Runner.run]
-    Run --> TaskTrace[TaskTrace]
-    
-    TaskTrace --> Attribute[Attribution.attribute]
-    Attribute --> AnnotatedTrace[AnnotatedTrace]
-    
-    SkillModel --> Compare[Comparator.compare]
-    Compare --> ComparisonReport[ComparisonReport]
-    
-    ScoreReport --> Render[Visualizer.render]
-    AnnotatedTrace --> Render
-    ComparisonReport --> Render
-    Render --> HTML[report.html]
-    
-    ScoreReport --> Generate[Reporter.generate_markdown]
-    AnnotatedTrace --> Generate
-    ComparisonReport --> Generate
-    Generate --> MD[report.md]
-    
-    HTML --> End(["用户查看可视化报告"])
-    MD --> End2(["用户粘贴到文档/PR"])
-```
+![](./assets/数据流.png)
 
 ## 五、关键技术决策
 
-| **决策点**     | **选择**                                  | **理由**                                        |
-| :------------- | :---------------------------------------- | :---------------------------------------------- |
-| Trace 收集方式 | 监听 OpenClaw `/debug`端点                | 零侵入，无需修改 OpenClaw 代码；JSON 格式易解析 |
-| 静态评分 LLM   | GPT-4o-mini（便宜）或 DeepSeek-V3（免费） | 平衡质量与成本；可配置                          |
-| 对照实验实现   | 两次独立运行，用临时空 skill 目录         | 简单可靠；OpenClaw 支持 `--skill-dir`           |
-| 可视化输出     | 单页 HTML（Mermaid + Chart.js）           | 无后端依赖，用户双击即可查看                    |
-| 报告格式       | Markdown + Mermaid 代码块                 | 可直接粘贴到 GitHub Issues / PR 评论            |
-| 并发模型       | `asyncio`+ `httpx`                        | 适合 I/O 密集型任务（HTTP 请求 + 日志轮询）     |
+| **决策点**    | **选择**                           | **理由**                          |
+|:-----------|:---------------------------------|:--------------------------------|
+| Trace 收集方式 | 监听 OpenClaw `/debug`端点           | 零侵入，无需修改 OpenClaw 代码；JSON 格式易解析 |
+| 静态评分 LLM   | GPT-4o-mini（便宜）或 DeepSeek-V3（免费） | 平衡质量与成本；可配置                     |
+| 对照实验实现     | 两次独立运行，用临时空 skill 目录             | 简单可靠；OpenClaw 支持 `--skill-dir`  |
+| 可视化输出      | 单页 HTML（Mermaid + Chart.js）      | 无后端依赖，用户双击即可查看                  |
+| 报告格式       | Markdown + Mermaid 代码块           | 可直接粘贴到 GitHub Issues / PR 评论    |
+| 并发模型       | `asyncio`+ `httpx`               | 适合 I/O 密集型任务（HTTP 请求 + 日志轮询）    |
 
 ## 六、扩展路径（v2+）
 

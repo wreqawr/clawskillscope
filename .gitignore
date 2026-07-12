@@ -55,3 +55,4 @@ Desktop.ini
 # 如果你后续添加了 secrets 或配置文件
 .env
 *.secret
+report.html
